@@ -116,9 +116,14 @@ function qsConfig(): QsConfig {
  * downstream query would return empty with no error — the single most
  * common "the data doesn't exist" false alarm.
  */
-async function qsFetch(
+export async function qsFetch(
     endpoint: string,
-    init: { method?: string; body?: BodyInit; headers?: Record<string, string> } = {}
+    init: {
+        method?: string;
+        body?: BodyInit;
+        headers?: Record<string, string>;
+        timeout?: number;
+    } = {}
 ): Promise<unknown> {
     const { base, apiKey, direct } = qsConfig();
     // Direct: M2M bearer; proxy: the QS proxy's X-Api-Key.
@@ -132,6 +137,7 @@ async function qsFetch(
         headers: { ...authHeaders, ...(init.headers ?? {}) },
         body: init.body,
         responseType: 'text',
+        timeout: init.timeout,
     });
     return qsParse(text);
 }

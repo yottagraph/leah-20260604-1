@@ -1,17 +1,16 @@
 /**
- * Entity search proxy.
+ * Entity search.
  *
- * Same-origin wrapper around `POST {gateway}/api/qs/{org}/entities/search`
- * that returns the top matches (with flavor + score) for a name query.
- * Kept server-side so the page can stay focused on UI state instead of
- * gateway wiring, and so the QS API key isn't read directly from
- * `useRuntimeConfig().public` in component code.
+ * Same-origin route that returns the top matches (with flavor + score) for
+ * a name query, fetched via `qsFetch` (direct in-cluster QS when configured,
+ * else the Portal proxy). Kept server-side so the page stays focused on UI
+ * state and never handles QS auth in component code.
  *
  * Query params:
  *   - q: string (required)        — the search query
  *   - maxResults: number (default 8) — upper bound on matches returned
  */
-import { isQsConfigured } from '~/server/utils/elementalQs';
+import { isQsConfigured, qsFetch } from '~/server/utils/elementalQs';
 
 interface SearchMatch {
     neid: string;
@@ -32,24 +31,19 @@ export default defineEventHandler(async (event): Promise<{ matches: SearchMatch[
         });
     }
 
-    const pub = useRuntimeConfig().public as Record<string, string>;
-    const url = `${pub.gatewayUrl}/api/qs/${pub.tenantOrgId}/entities/search`;
     const limit = Math.min(20, Math.max(1, Number(maxResults) || 8));
 
     try {
-        const res = await $fetch<any>(url, {
+        const res = (await qsFetch('entities/search', {
             method: 'POST',
-            headers: {
-                'X-Api-Key': pub.qsApiKey,
-                'Content-Type': 'application/json',
-            },
-            body: {
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
                 queries: [{ queryId: 1, query }],
                 maxResults: limit,
                 includeNames: true,
-            },
+            }),
             timeout: 15000,
-        });
+        })) as any;
 
         const raw: any[] = res?.results?.[0]?.matches ?? [];
         const matches: SearchMatch[] = raw.map((m) => ({

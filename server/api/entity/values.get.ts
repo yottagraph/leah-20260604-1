@@ -17,7 +17,7 @@
  *   - type: string (optional)  — property type from /schema. When
  *                                "data_nindex" we resolve linked names.
  */
-import { isQsConfigured, padNeid, qsParse, resolveEntityNames } from '~/server/utils/elementalQs';
+import { isQsConfigured, padNeid, qsFetch, resolveEntityNames } from '~/server/utils/elementalQs';
 
 interface ValueItem {
     /** Raw value (string). For data_nindex this is the padded 20-char NEID. */
@@ -52,9 +52,6 @@ export default defineEventHandler(async (event): Promise<ValuesResponse> => {
         throw createError({ statusCode: 503, statusMessage: 'Query Server is not configured' });
     }
 
-    const pub = useRuntimeConfig().public as Record<string, string>;
-    const url = `${pub.gatewayUrl}/api/qs/${pub.tenantOrgId}/elemental/entities/properties`;
-
     // Build the form body with the pid as a literal — JSON.stringify would
     // round large negatives.
     const form = new URLSearchParams();
@@ -63,17 +60,12 @@ export default defineEventHandler(async (event): Promise<ValuesResponse> => {
 
     let parsed: any;
     try {
-        const text = await $fetch<string>(url, {
+        parsed = await qsFetch('elemental/entities/properties', {
             method: 'POST',
-            headers: {
-                'X-Api-Key': pub.qsApiKey,
-                'Content-Type': 'application/x-www-form-urlencoded',
-            },
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: form.toString(),
-            responseType: 'text',
             timeout: 15000,
         });
-        parsed = qsParse(text);
     } catch (err: any) {
         const status = err?.statusCode ?? err?.response?.status ?? 502;
         if (status === 404) {
