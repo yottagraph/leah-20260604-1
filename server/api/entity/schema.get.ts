@@ -12,7 +12,7 @@
  * Query params:
  *   - flavor: string (required)  — the entity flavor (e.g. "organization")
  */
-import { isQsConfigured, qsParse } from '~/server/utils/elementalQs';
+import { isQsConfigured, qsFetch } from '~/server/utils/elementalQs';
 
 interface SchemaProperty {
     pid: string;
@@ -36,16 +36,8 @@ async function fetchRawSchema(): Promise<any> {
     if (rawSchemaCache) return rawSchemaCache;
     if (rawSchemaPromise) return rawSchemaPromise;
 
-    const pub = useRuntimeConfig().public as Record<string, string>;
-    const url = `${pub.gatewayUrl}/api/qs/${pub.tenantOrgId}/elemental/metadata/schema`;
-
     rawSchemaPromise = (async () => {
-        const text = await $fetch<string>(url, {
-            headers: { 'X-Api-Key': pub.qsApiKey },
-            responseType: 'text',
-            timeout: 20000,
-        });
-        rawSchemaCache = qsParse(text);
+        rawSchemaCache = await qsFetch('elemental/metadata/schema', { timeout: 20000 });
         return rawSchemaCache;
     })().finally(() => {
         rawSchemaPromise = null;
