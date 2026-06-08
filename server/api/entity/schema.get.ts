@@ -32,9 +32,9 @@ interface SchemaResponse {
 let rawSchemaCache: any = null;
 let rawSchemaPromise: Promise<any> | null = null;
 
-async function fetchRawSchema(): Promise<any> {
-    if (rawSchemaCache) return rawSchemaCache;
-    if (rawSchemaPromise) return rawSchemaPromise;
+async function fetchRawSchema(force = false): Promise<any> {
+    if (rawSchemaCache && !force) return rawSchemaCache;
+    if (rawSchemaPromise && !force) return rawSchemaPromise;
 
     rawSchemaPromise = (async () => {
         rawSchemaCache = await qsFetch('elemental/metadata/schema', { timeout: 20000 });
@@ -56,17 +56,28 @@ export default defineEventHandler(async (event): Promise<SchemaResponse> => {
         throw createError({ statusCode: 503, statusMessage: 'Query Server is not configured' });
     }
 
-    const raw = await fetchRawSchema();
-    const rawProps: any[] = raw?.schema?.properties ?? raw?.properties ?? [];
-    const rawFlavors: any[] = raw?.schema?.flavors ?? raw?.flavors ?? [];
+    let raw = await fetchRawSchema();
+    let rawFlavors: any[] = raw?.schema?.flavors ?? raw?.flavors ?? [];
+    let flavorInfo = rawFlavors.find((f) => f?.name === flavorName);
 
-    const flavorInfo = rawFlavors.find((f) => f?.name === flavorName);
+    // The metadata schema is cached in-process and never expires, so a
+    // flavor minted after we cached (e.g. a newly-ingested custom-source
+    // flavor) would look "unknown" until the app restarts. Refetch once
+    // before giving up — cheap, and it self-heals as new flavors land.
+    if (!flavorInfo) {
+        raw = await fetchRawSchema(true);
+        rawFlavors = raw?.schema?.flavors ?? raw?.flavors ?? [];
+        flavorInfo = rawFlavors.find((f) => f?.name === flavorName);
+    }
+
     if (!flavorInfo) {
         throw createError({
             statusCode: 404,
             statusMessage: `Unknown flavor: ${flavorName}`,
         });
     }
+
+    const rawProps: any[] = raw?.schema?.properties ?? raw?.properties ?? [];
 
     const properties: SchemaProperty[] = [];
     const relationships: SchemaProperty[] = [];
