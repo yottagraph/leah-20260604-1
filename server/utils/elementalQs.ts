@@ -150,7 +150,10 @@ export function qsParse(text: string): unknown {
     // with no fractional or exponent part following it. The QS returns
     // data_float values as bare JSON numbers, so without this JSON.parse
     // throws "Expected ',' or '}' after property value".
-    const safe = text.replace(/"(pid|fid|findex|eid|value)"\s*:\s*(-?\d+)(?![\d.eE])/g, '"$1":"$2"');
+    const safe = text.replace(
+        /"(pid|fid|findex|eid|value)"\s*:\s*(-?\d+)(?![\d.eE])/g,
+        '"$1":"$2"'
+    );
     return JSON.parse(safe);
 }
 
@@ -311,6 +314,91 @@ export async function findLinkedCount(
 
     const eids: string[] = (res?.eids ?? []).map((e: unknown) => padNeid(String(e)));
     return { count: eids.length, sampleNeids: eids.slice(0, opts.sampleSize ?? 5) };
+}
+
+/**
+ * Find entities linked TO `neid` via a specific relationship pid, in the
+ * given direction. Returns the linked entity NEIDs (zero-padded to 20 chars).
+ *
+ * The expression is built as a raw string so the relationship `pid` stays an
+ * unquoted integer literal — JSON.stringify of a 64-bit pid would round it
+ * (see `qsParse`), and the QS rejects quoted pids. `pidStr` MUST be validated
+ * as a numeric string by the caller before it reaches here.
+ */
+export async function findLinkedByPid(
+    neid: string,
+    pidStr: string,
+    opts: { direction?: 'incoming' | 'outgoing'; distance?: number; limit?: number } = {}
+): Promise<string[]> {
+    const direction = opts.direction ?? 'incoming';
+    const distance = opts.distance ?? 1;
+    const expression =
+        `{"type":"linked","linked":{"to_entity":"${padNeid(neid)}",` +
+        `"distance":${distance},"direction":"${direction}","pids":[${pidStr}]}}`;
+
+    const form = new URLSearchParams();
+    form.set('expression', expression);
+    form.set('limit', String(opts.limit ?? 50));
+
+    const res = (await qsFetch('elemental/find', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: form.toString(),
+        timeout: 15000,
+    })) as any;
+
+    const eids: unknown[] = res?.eids ?? res?.find?.eids ?? [];
+    return eids.map((e) => padNeid(String(e)));
+}
+
+/**
+ * Resolve an entity's flavor (entity type) by NEID. There's no single REST
+ * endpoint for this, so we try two keyed-by-NEID strategies: the entity search
+ * (matching the NEID among results for its own name) and, failing that, the
+ * graph layout whose node labels are `flavor|name|...`. Returns '' if neither
+ * yields a flavor.
+ */
+export async function resolveEntityFlavor(neid: string, name?: string): Promise<string> {
+    const padded = padNeid(neid);
+
+    // Strategy 1: search by the entity's name and find the match with our NEID.
+    const query = (name ?? '').trim();
+    if (query && query !== padded) {
+        try {
+            const res = (await qsFetch('entities/search', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    queries: [{ queryId: 1, query }],
+                    maxResults: 20,
+                    includeNames: true,
+                }),
+                timeout: 15000,
+            })) as any;
+            const matches: any[] = res?.results?.[0]?.matches ?? [];
+            const hit = matches.find((m) => padNeid(String(m?.neid ?? '')) === padded);
+            const flavor = String(hit?.flavor ?? '').trim();
+            if (flavor) return flavor;
+        } catch {
+            // fall through to the graph-layout strategy
+        }
+    }
+
+    // Strategy 2: the graph layout node label leads with the flavor.
+    try {
+        const res = (await qsFetch(`graph/${padded}/layout`, { timeout: 15000 })) as any;
+        const nodes: any[] = res?.nodes ?? [];
+        const node =
+            nodes.find((n) => padNeid(String(n?.neid ?? '')) === padded) ??
+            nodes.find((n) => n?.isCentralNode);
+        const label = String(node?.label ?? '');
+        const flavor = label.split('|')[0]?.trim() ?? '';
+        if (flavor) return flavor;
+    } catch {
+        // give up — caller falls back to an empty flavor
+    }
+
+    return '';
 }
 
 /**

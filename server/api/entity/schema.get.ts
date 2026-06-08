@@ -18,6 +18,8 @@ interface SchemaProperty {
     pid: string;
     name: string;
     type: string;
+    uid: string;
+    direction?: 'incoming' | 'outgoing';
     targetFlavors?: string[];
 }
 
@@ -27,6 +29,7 @@ interface SchemaResponse {
     flavorDescription: string | null;
     properties: SchemaProperty[];
     relationships: SchemaProperty[];
+    incomingRelationships: SchemaProperty[];
 }
 
 let rawSchemaCache: any = null;
@@ -81,32 +84,53 @@ export default defineEventHandler(async (event): Promise<SchemaResponse> => {
 
     const properties: SchemaProperty[] = [];
     const relationships: SchemaProperty[] = [];
+    const incomingRelationships: SchemaProperty[] = [];
 
     for (const p of rawProps) {
+        const pid = String(p?.pid ?? '');
+        const name = String(p?.name ?? '');
+        const type = String(p?.type ?? '');
+        if (!pid || !name) continue;
+
         const domains: string[] = Array.isArray(p?.domain_flavors) ? p.domain_flavors : [];
-        if (!domains.includes(flavorName)) continue;
+        const targets: string[] = Array.isArray(p?.target_flavors)
+            ? (p.target_flavors as unknown[]).map(String)
+            : [];
 
-        const entry: SchemaProperty = {
-            pid: String(p?.pid ?? ''),
-            name: String(p?.name ?? ''),
-            type: String(p?.type ?? ''),
-        };
-        if (!entry.pid || !entry.name) continue;
+        // Outgoing: this flavor is the source of the property.
+        if (domains.includes(flavorName)) {
+            if (type === 'data_nindex') {
+                relationships.push({
+                    pid,
+                    name,
+                    type,
+                    uid: pid,
+                    direction: 'outgoing',
+                    ...(targets.length ? { targetFlavors: targets } : {}),
+                });
+            } else {
+                properties.push({ pid, name, type, uid: pid });
+            }
+        }
 
-        if (entry.type === 'data_nindex') {
-            const targets = Array.isArray(p?.target_flavors)
-                ? (p.target_flavors as unknown[]).map(String)
-                : [];
-            if (targets.length) entry.targetFlavors = targets;
-            relationships.push(entry);
-        } else {
-            properties.push(entry);
+        // Incoming: this flavor is the target of another entity's relationship.
+        if (type === 'data_nindex' && targets.includes(flavorName)) {
+            incomingRelationships.push({
+                pid,
+                name,
+                type,
+                uid: `${pid}:in`,
+                direction: 'incoming',
+                // The "other side" of an incoming edge is the source flavor.
+                ...(domains.length ? { targetFlavors: domains } : {}),
+            });
         }
     }
 
     const byName = (a: SchemaProperty, b: SchemaProperty) => a.name.localeCompare(b.name);
     properties.sort(byName);
     relationships.sort(byName);
+    incomingRelationships.sort(byName);
 
     return {
         flavor: flavorName,
@@ -114,5 +138,6 @@ export default defineEventHandler(async (event): Promise<SchemaResponse> => {
         flavorDescription: flavorInfo?.description ?? null,
         properties,
         relationships,
+        incomingRelationships,
     };
 });

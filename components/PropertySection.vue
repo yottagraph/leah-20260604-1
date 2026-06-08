@@ -23,16 +23,16 @@
 
             <div class="items-scroll">
                 <v-list density="compact" class="py-0">
-                    <template v-for="item in visibleItems" :key="item.pid">
+                    <template v-for="item in visibleItems" :key="item.uid">
                         <v-list-item
-                            :active="expandedPid === item.pid"
+                            :active="expandedUid === item.uid"
                             class="property-item"
                             @click="$emit('select', item)"
                         >
                             <template v-slot:prepend>
                                 <v-icon
                                     :icon="
-                                        expandedPid === item.pid
+                                        expandedUid === item.uid
                                             ? 'mdi-chevron-down'
                                             : 'mdi-chevron-right'
                                     "
@@ -40,6 +40,21 @@
                                 />
                             </template>
                             <v-list-item-title class="font-monospace prop-name">
+                                <v-icon
+                                    v-if="item.direction"
+                                    :icon="
+                                        item.direction === 'incoming'
+                                            ? 'mdi-arrow-bottom-left-thin'
+                                            : 'mdi-arrow-top-right-thin'
+                                    "
+                                    size="small"
+                                    class="mr-1 direction-icon"
+                                    :title="
+                                        item.direction === 'incoming'
+                                            ? 'Incoming — other entities point here'
+                                            : 'Outgoing — this entity points out'
+                                    "
+                                />
                                 {{ item.name }}
                             </v-list-item-title>
                             <template v-slot:append>
@@ -50,7 +65,13 @@
                                         variant="tonal"
                                         color="secondary"
                                     >
-                                        <v-icon start size="x-small">mdi-arrow-right-thin</v-icon>
+                                        <v-icon start size="x-small">
+                                            {{
+                                                item.direction === 'incoming'
+                                                    ? 'mdi-arrow-left-thin'
+                                                    : 'mdi-arrow-right-thin'
+                                            }}
+                                        </v-icon>
                                         {{ item.targetFlavors.join(', ') }}
                                     </v-chip>
                                     <v-chip size="x-small" variant="tonal" class="type-chip">
@@ -61,9 +82,9 @@
                         </v-list-item>
 
                         <v-expand-transition>
-                            <div v-if="expandedPid === item.pid" class="values-block">
+                            <div v-if="expandedUid === item.uid" class="values-block">
                                 <div
-                                    v-if="loadingPid === item.pid"
+                                    v-if="loadingUid === item.uid"
                                     class="d-flex align-center pa-3"
                                 >
                                     <v-progress-circular
@@ -77,7 +98,10 @@
                                     </span>
                                 </div>
                                 <template v-else>
-                                    <ValuesDisplay :payload="valuesCache[cacheKeyFor(item.pid)]" />
+                                    <ValuesDisplay
+                                        :payload="valuesCache[cacheKeyFor(item.uid)]"
+                                        @navigate="$emit('navigate', $event)"
+                                    />
                                 </template>
                             </div>
                         </v-expand-transition>
@@ -100,20 +124,23 @@
 
 <script setup lang="ts">
     import ValuesDisplay from '~/components/ValuesDisplay.vue';
-    import type { SchemaProperty, ValuesPayload } from '~/composables/useEntityExplorer';
+    import type { SchemaProperty, ValueItem, ValuesPayload } from '~/composables/useEntityExplorer';
 
     interface Props {
         title: string;
         icon: string;
         items: SchemaProperty[];
         neid: string;
-        expandedPid: string | null;
-        loadingPid: string | null;
+        expandedUid: string | null;
+        loadingUid: string | null;
         valuesCache: Record<string, ValuesPayload>;
     }
 
     const props = defineProps<Props>();
-    defineEmits<{ (e: 'select', item: SchemaProperty): void }>();
+    defineEmits<{
+        (e: 'select', item: SchemaProperty): void;
+        (e: 'navigate', item: ValueItem): void;
+    }>();
 
     const filterText = ref('');
 
@@ -123,8 +150,8 @@
         return props.items.filter((p) => p.name.toLowerCase().includes(f));
     });
 
-    function cacheKeyFor(pid: string) {
-        return `${props.neid}::${pid}`;
+    function cacheKeyFor(uid: string) {
+        return `${props.neid}::${uid}`;
     }
 
     function shortType(type: string) {
@@ -155,6 +182,11 @@
     .prop-name {
         font-family: var(--font-mono);
         font-size: 0.85rem;
+    }
+
+    .direction-icon {
+        opacity: 0.55;
+        vertical-align: text-bottom;
     }
 
     .type-chip {

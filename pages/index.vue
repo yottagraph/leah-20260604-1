@@ -11,7 +11,7 @@
                         <v-text-field
                             v-model="searchInput"
                             label="Find an entity"
-                            placeholder="e.g. Microsoft, JPMorgan, United States…"
+                            placeholder="e.g. Japan, India, Yen, Rupee…"
                             prepend-inner-icon="mdi-magnify"
                             clearable
                             hide-details
@@ -109,26 +109,27 @@
                             icon="mdi-tag-multiple-outline"
                             :items="schema.properties"
                             :neid="selected.neid"
-                            :loading-pid="loadingPid"
-                            :expanded-pid="expandedPid"
+                            :loading-uid="loadingUid"
+                            :expanded-uid="expandedUid"
                             :values-cache="valuesCache"
                             @select="loadValues"
                             class="mb-4"
                         />
                         <PropertySection
-                            v-if="schema.relationships.length"
+                            v-if="relationshipItems.length"
                             title="Relationships"
                             icon="mdi-graph"
-                            :items="schema.relationships"
+                            :items="relationshipItems"
                             :neid="selected.neid"
-                            :loading-pid="loadingPid"
-                            :expanded-pid="expandedPid"
+                            :loading-uid="loadingUid"
+                            :expanded-uid="expandedUid"
                             :values-cache="valuesCache"
                             @select="loadValues"
+                            @navigate="navigateToEntity"
                         />
 
                         <v-empty-state
-                            v-if="!schema.properties.length && !schema.relationships.length"
+                            v-if="!schema.properties.length && !relationshipItems.length"
                             headline="No properties or relationships"
                             text="The schema defines no fields for this flavor yet."
                             icon="mdi-database-off"
@@ -154,6 +155,7 @@
         EntityMatch,
         FlavorSchema,
         SchemaProperty,
+        ValueItem,
         ValuesPayload,
     } from '~/composables/useEntityExplorer';
 
@@ -172,10 +174,17 @@
     // user jumps between entities of the same type.
     const schemaCache = new Map<string, FlavorSchema>();
 
-    // Cache property values keyed by `${neid}::${pid}`.
+    // Cache property values keyed by `${neid}::${uid}`.
     const valuesCache = reactive<Record<string, ValuesPayload>>({});
-    const loadingPid = ref<string | null>(null);
-    const expandedPid = ref<string | null>(null);
+    const loadingUid = ref<string | null>(null);
+    const expandedUid = ref<string | null>(null);
+
+    // Outgoing + incoming relationships shown together in the Relationships
+    // section; the per-item `direction` distinguishes them in the UI.
+    const relationshipItems = computed<SchemaProperty[]>(() => {
+        if (!schema.value) return [];
+        return [...schema.value.relationships, ...schema.value.incomingRelationships];
+    });
 
     let searchToken = 0;
     let debounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -227,8 +236,53 @@
     async function selectEntity(m: EntityMatch) {
         if (selected.value?.neid === m.neid) return;
         selected.value = m;
-        expandedPid.value = null;
+        expandedUid.value = null;
         await loadSchemaForFlavor(m.flavor);
+    }
+
+    // Load a related entity (clicked inside a relationship's values) as the new
+    // target. Its flavor isn't known from the link alone, so resolve it first.
+    async function navigateToEntity(item: ValueItem) {
+        const neid = item.value;
+        if (!neid || selected.value?.neid === neid) return;
+
+        searchError.value = null;
+        selected.value = { neid, name: item.label, flavor: '', score: 0 };
+        expandedUid.value = null;
+        schema.value = null;
+        schemaError.value = null;
+        schemaLoading.value = true;
+
+        let resolved: { neid: string; name: string; flavor: string };
+        try {
+            resolved = await $fetch<{ neid: string; name: string; flavor: string }>(
+                '/api/entity/resolve',
+                { params: { neid, name: item.label } }
+            );
+        } catch (err: any) {
+            schemaLoading.value = false;
+            schemaError.value =
+                err?.statusMessage ||
+                err?.data?.statusMessage ||
+                err?.message ||
+                'Failed to load this entity';
+            return;
+        }
+
+        selected.value = {
+            neid: resolved.neid,
+            name: resolved.name || item.label,
+            flavor: resolved.flavor,
+            score: 0,
+        };
+        schemaLoading.value = false;
+
+        if (!resolved.flavor) {
+            schemaError.value =
+                "Couldn't determine this entity's type, so its schema can't be loaded.";
+            return;
+        }
+        await loadSchemaForFlavor(resolved.flavor);
     }
 
     async function loadSchemaForFlavor(flavor: string) {
@@ -265,25 +319,26 @@
 
     async function loadValues(prop: SchemaProperty) {
         if (!selected.value) return;
-        const cacheKey = `${selected.value.neid}::${prop.pid}`;
+        const cacheKey = `${selected.value.neid}::${prop.uid}`;
 
-        // Toggle collapse when clicking the same property again.
-        if (expandedPid.value === prop.pid) {
-            expandedPid.value = null;
+        // Toggle collapse when clicking the same item again.
+        if (expandedUid.value === prop.uid) {
+            expandedUid.value = null;
             return;
         }
 
-        expandedPid.value = prop.pid;
+        expandedUid.value = prop.uid;
 
         if (valuesCache[cacheKey]) return;
 
-        loadingPid.value = prop.pid;
+        loadingUid.value = prop.uid;
         try {
             const res = await $fetch<ValuesPayload>('/api/entity/values', {
                 params: {
                     neid: selected.value.neid,
                     pid: prop.pid,
                     type: prop.type,
+                    ...(prop.direction === 'incoming' ? { direction: 'incoming' } : {}),
                 },
             });
             valuesCache[cacheKey] = res;
@@ -299,7 +354,7 @@
                     'Failed to load values',
             };
         } finally {
-            if (loadingPid.value === prop.pid) loadingPid.value = null;
+            if (loadingUid.value === prop.uid) loadingUid.value = null;
         }
     }
 </script>
