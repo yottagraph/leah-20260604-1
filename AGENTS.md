@@ -12,7 +12,7 @@
 
 **Source of truth:** `DESIGN.md` -- read before starting work, update when changing features. The starter UI is placeholder -- replace freely. Feature docs in `design/` for implementation planning.
 
-**Git:** Commit meaningful units of work. Run `npm run format` before commit. Message format: `[Agent commit] {summary}`. Push directly to `main` with `git push origin main` — do NOT create PRs, do NOT run `gh pr create`, and do NOT use feature branches. This project's `main` is not protected; Vercel auto-deploys on push to `main`, and that's how the app gets live. A PR blocks the auto-deploy and breaks the smooth first-run flow.
+**Git:** Commit meaningful units of work. Run `npm run format` before commit. Message format: `[Agent commit] {summary}`. Push directly to `main` with `git push origin main` — do NOT create PRs, do NOT run `gh pr create`, and do NOT use feature branches. This project's `main` is not protected. This tenant is `hosting: gcp` (see `broadchurch.yaml`): a push to `main` triggers the **Deploy Aether UI** GitHub Actions workflow (`.github/workflows/deploy-ui.yml` → Cloud Build → per-tenant GKE cluster), which is how the app gets live — no manual step. A PR leaves the change on a branch, so the deploy workflow never runs and the app never updates.
 
 **First action for a new project:** Run `/build_my_app`.
 
