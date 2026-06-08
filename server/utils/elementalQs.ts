@@ -144,7 +144,13 @@ export async function qsFetch(
 
 /** Quote 64-bit-risky integer fields, then JSON.parse. Exported for tests/edge use. */
 export function qsParse(text: string): unknown {
-    const safe = text.replace(/"(pid|fid|findex|eid|value)"\s*:\s*(-?\d+)/g, '"$1":"$2"');
+    // The negative lookahead keeps us from clipping the integer part of a
+    // float/exponent value (e.g. a `data_float` like 64.77, which a bare
+    // `-?\d+` would rewrite to the invalid `"64".77`): only quote a number
+    // with no fractional or exponent part following it. The QS returns
+    // data_float values as bare JSON numbers, so without this JSON.parse
+    // throws "Expected ',' or '}' after property value".
+    const safe = text.replace(/"(pid|fid|findex|eid|value)"\s*:\s*(-?\d+)(?![\d.eE])/g, '"$1":"$2"');
     return JSON.parse(safe);
 }
 
